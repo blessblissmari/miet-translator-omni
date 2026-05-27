@@ -1,0 +1,104 @@
+# MIET Translator Pro
+
+Веб-приложение, которое переводит англоязычные академические **PDF / DOCX / PPTX** в русские
+документы и презентации в шаблоне МИЭТ. Полностью браузерное: всё извлечение и сборка происходит
+на клиенте, на сервер уходит только текст в Xiaomi MiMo для перевода.
+
+**Live:** https://blessblissmari.github.io/miet-translator-pro/
+
+> Форк/наследник [miet-translator](https://github.com/blessblissmari/miet-translator)
+> с улучшениями по продакшен-спеке: «Tinder»-флоу распределения, очерёдность DOCX→PPTX,
+> расширенный ЦОС-глоссарий, отчёт + лог в архиве, ГОСТ-стили DOCX, E2E-тесты.
+
+## Два режима работы
+
+### 1. Веб-приложение (по умолчанию)
+
+Полностью браузерное: открываешь сайт, вставляешь ключ MiMo (Xiaomi), кидаешь
+файлы / папку / `.zip` / `.rar` / `.7z`, тиндер-карточками раскидываешь по DOCX /
+PPTX / пропуск, жмёшь «Запустить». Документы идут первыми, потом презентации,
+после — скачиваешь ZIP с результатами, отчётом и логом.
+
+### 2. Node CLI (`tools/cli`) — продакшен-качество
+
+Когда нужен пакетный прогон или **настоящие Office-уравнения** в DOCX:
+
+| pipeline | input | output |
+| --- | --- | --- |
+| `translate-docs-pandoc.mjs` | текстовый PDF | DOCX через pandoc — `$..$` / `$$..$$` рендерится в нативный OMML |
+| `translate-slides.mjs` | слайды (landscape PDF) | PPTX в шаблоне МИЭТ |
+| `translate-scan.mjs` | скан / фото / рукопись | OCR vision-моделью + pandoc → DOCX |
+
+См. [`tools/cli/README.md`](tools/cli/README.md). Бэкенд: тот же ЦОС-глоссарий,
+sanitizer LaTeX-команд (`\Bigl`, `\includegraphics`, ...), отключение reasoning
+для gpt-oss моделей.
+
+## Что нового по сравнению с базой
+
+| Область | Изменение |
+|---|---|
+| Очередь | Сначала отрабатывают все DOCX, потом все PPTX (ТЗ §2.2). |
+| UX | Пауза / Продолжить / Стоп. Кнопка «Повторить все ошибки». |
+| Экспорт | В архив попадают `report.md` и `log.txt` помимо результатов. |
+| Перевод | Статический ЦОС-глоссарий (~90 терминов: FIR/IIR/FFT/Найквист/Баттерворт/…) подаётся в каждый промпт и пост-обработкой подменяет оставшиеся английские термины. |
+| DOCX | Times New Roman 14pt, межстрочный 1.5, ГОСТ-поля (30/20/20/15 мм). |
+| Слайды | Из переводов убираются copyright/номера слайдов; промпт инструктирует использовать Юникод для коротких формул. |
+| Архивы | Поддержка `.zip / .rar / .7z / .tar / .tar.gz` через libarchive.js (WASM). |
+| Тесты | Добавлены unit-тесты глоссария + сценарий E2E (Playwright, опционально). |
+
+## Стек
+
+- **Frontend:** React 19 + TypeScript + Vite 8
+- **Парсинг:** pdf.js, `docx-preview` для настоящего Word-like DOCX-рендера, визуальный PPTX/PDF-style разбор, libarchive.js для архивов
+- **Перевод / OCR:** Xiaomi MiMo API через Singapore endpoint (`https://token-plan-sgp.xiaomimimo.com/v1`):
+  - `mimo-v2.5` — дорогой/качественный глобальный OCR + layout blueprint по всему документу;
+  - `mimo-v2-omni` — page OCR, pdfjs/docx-preview сверка и дешёвый watchdog.
+- **Сборка:** `docx@9` + LaTeX→OMML, кастомный PPTX-builder (JSZip + шаблон МИЭТ)
+- **Деплой:** GitHub Pages (статический SPA)
+
+## Локальный запуск
+
+```bash
+npm install         # или bun install
+npm run dev         # http://localhost:5173
+```
+
+1. Открыть в браузере, в «Настройках» вставить MiMo (Xiaomi) API key
+   (получить — https://xiaomimimo.com).
+2. Перетащить файлы / папку / `.zip` / `.rar`.
+3. Распределить карточки: **DOCX**, **PPTX** или пропустить (свайп-дек).
+4. Нажать **Запустить**. Сначала прогонятся документы, потом презентации.
+5. **Скачать всё** — получишь `miet-translator-results.zip` с готовыми файлами + отчёт + лог.
+
+## Тесты
+
+```bash
+npm run test        # vitest (unit)
+npm run typecheck   # tsc -b
+npm run lint        # eslint
+```
+
+## Архитектура (3 слоя)
+
+1. **UI** (`src/App.tsx`, `src/components/*`) — загрузка, swipe-deck, очередь, Word-like DOCX preview, PDF/PPTX preview.
+2. **Локальный runtime** (`src/lib/*`) — распаковка `.zip/.rar/.7z`, рендер PDF/DOCX/PPTX в страницы, pdfjs/docx layout hints, сборка результата (`docxBuild.ts`, `pptxBuild.ts`).
+3. **Translation service** (`src/lib/mimo.ts`, `layoutBlueprint.ts`, `docPlanner.ts`, `slidePlanner.ts`) — multi-pass MiMo pipeline:
+   - вход: PDF/DOCX/PPTX/ZIP/RAR/7Z;
+   - глобальный OCR/layout pass по всему документу на `mimo-v2.5`;
+   - page OCR/translation на `mimo-v2-omni`;
+   - сверка с pdfjs/docx-preview текстом;
+   - watchdog + math audit;
+   - финальный академический перевод с OMML-формулами и белым фоном для графики.
+
+MiMo-ключ хранится **только в localStorage** и никогда не уходит никуда,
+кроме самих запросов к Xiaomi MiMo.
+
+## Шаблон МИЭТ
+
+Лежит в `src/assets/template.pptx`. Структура layout'ов и маппинг — в
+`src/lib/pptxBuild.ts`. Шаблон не модифицируется — новый PPTX строится
+поверх него с заменой контента.
+
+## Лицензия и контекст
+
+Учебный проект (МИЭТ). Используй как fork-точку для своих переводческих задач.
