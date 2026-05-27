@@ -19,6 +19,7 @@ export interface IntakeFile {
 const ZIP_EXT = /\.(zip)$/i;
 const ARCHIVE_EXT = /\.(rar|7z|tar|tar\.gz|tgz)$/i;
 const SUPPORTED_EXT = /\.(pdf|pptx|docx|png|jpe?g|webp|gif|bmp|txt|md|markdown|rst)$/i;
+const ARCHIVE_DEBUG = import.meta.env.DEV || new URLSearchParams(location.search).has("debugArchive");
 
 /** Recursively expand the input list into individual document blobs.
  *  Accepts:
@@ -63,12 +64,20 @@ async function extractZip(file: File): Promise<IntakeFile[]> {
 
 async function extractArchive(file: File): Promise<IntakeFile[]> {
   await ensureInit();
-  const archive = await Archive.open(file);
-  // extractFiles returns nested object {dirname: {filename: File}}; we'll walk it.
-  const tree = (await archive.extractFiles()) as Record<string, unknown>;
-  const out: IntakeFile[] = [];
-  walkTree(tree, "", out);
-  return out;
+  try {
+    const archive = await Archive.open(file);
+    // extractFiles returns nested object {dirname: {filename: File}}; we'll walk it.
+    const tree = (await archive.extractFiles()) as Record<string, unknown>;
+    const out: IntakeFile[] = [];
+    walkTree(tree, "", out);
+    if (ARCHIVE_DEBUG) {
+      console.info(`[intake] ${file.name}: extracted ${out.length} supported files from archive`);
+    }
+    return out;
+  } catch (e) {
+    console.error(`[intake] failed to extract archive ${file.name}`, e);
+    throw new Error(`Не удалось распаковать архив ${file.name}: ${(e as Error).message || String(e)}`, { cause: e });
+  }
 }
 
 function walkTree(node: unknown, prefix: string, out: IntakeFile[]) {
