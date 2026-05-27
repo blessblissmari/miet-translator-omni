@@ -350,9 +350,12 @@ export async function planDoc(
 
   const blueprint = await buildDocumentBlueprint(extracted, opts);
 
+  const pageConcurrency = Math.max(1, Math.min(opts.concurrency ?? 3, extracted.pages.length));
+  opts.onLog?.(`Page OCR: ${pageConcurrency} параллельн. задач(и)`);
+
   const results = await mapWithConcurrency(
     extracted.pages,
-    Math.max(1, opts.concurrency ?? 3),
+    pageConcurrency,
     async (page, i) => {
       const blocks = await translateDocPage(page, opts, glossary, blueprint);
       done++;
