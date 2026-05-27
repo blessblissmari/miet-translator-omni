@@ -31,6 +31,7 @@ export function PdfPreview({ blob }: { blob: Blob }) {
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        if (cancelled || !ref.current) return;
         ref.current.appendChild(canvas);
       }
     })().catch(console.error);
